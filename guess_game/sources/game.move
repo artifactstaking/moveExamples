@@ -22,40 +22,30 @@ module guess_game::game {
         address: address
     }
 
-    const EMaxPlayersReached: u64 = 0;
-    const EInvalidBetAmount: u64 = 1;
-    const EGameAlreadyFinished: u64 = 2;
+    const EGameAlreadyFinished: u64 = 1;
+    const EPlayerAlreadyPlayed: u64 = 2;
+    const EInvalidGuess: u64 = 3;
+    const EInvalidBetAmount: u64 = 4;
 
-    public fun create<C>(
+    public entry fun create_game<C>(
         ctx: &mut TxContext
-    ): Game<C> {
-        Game {
-            id: object::new(ctx),
-            is_finished: false,
-            balance: balance::zero(),
-            players: vector::empty(),
-        }
+    ) {
+        transfer::share_object(create_game_internal<C>(ctx));
     }
 
-    public fun create_and_play<C>(
+    public entry fun create_and_play_game<C>(
         guess: u64,
         payment: Coin<C>,
         clock: &Clock,
         ctx: &mut TxContext
-    ): Game<C> {
-        let game = create<C>(ctx);
-        play(&mut game, guess, payment, clock, ctx);
-
-        game
-    }
-
-    public fun return_and_share<C>(
-        self: Game<C>
     ) {
-        transfer::share_object(self)
+        let game = create_game_internal<C>(ctx);
+        play_game(&mut game, guess, payment, clock, ctx);
+
+        transfer::share_object(game)
     }
 
-    public fun play<C>(
+    public entry fun play_game<C>(
         self: &mut Game<C>,
         guess: u64,
         payment: Coin<C>,
@@ -63,20 +53,35 @@ module guess_game::game {
         ctx: &mut TxContext
     ) {
         assert!(!self.is_finished, EGameAlreadyFinished);
-        assert!(vector::length(&self.players) < 2, EMaxPlayersReached);
 
-        let balance = balance::value(&self.balance);
-        if(balance != 0u64) { 
-            assert!(coin::value(&payment) == balance, EInvalidBetAmount) 
+        let sender = tx_context::sender(ctx);
+        if(!vector::is_empty(&self.players)) {
+            let balance = balance::value(&self.balance);
+            let player_1 = vector::borrow(&self.players, 0);
+            
+            assert!(player_1.guess != guess, EInvalidGuess);
+            assert!(player_1.address != sender, EPlayerAlreadyPlayed);
+            assert!(coin::value(&payment) == balance, EInvalidBetAmount);
+        } else {
+            assert!(coin::value(&payment) != 0, EInvalidBetAmount);
         };
 
         coin::put(&mut self.balance, payment);
-
-        let sender = tx_context::sender(ctx);
         vector::push_back(&mut self.players, Player { guess, address: sender });
 
         if(vector::length(&self.players) == 2) { 
             finish_game(self, clock, ctx) 
+        }
+    }
+
+    fun create_game_internal<C>(
+        ctx: &mut TxContext
+    ): Game<C> {
+        Game {
+            id: object::new(ctx),
+            is_finished: false,
+            balance: balance::zero(),
+            players: vector::empty(),
         }
     }
 
@@ -99,9 +104,9 @@ module guess_game::game {
         } else if(diff_2 < diff_1) {
             transfer::public_transfer(coin::from_balance(total_balance, ctx), player_2.address)
         } else {
-            let refund_amount = balance::value(&total_balance) / 2;
+            let half_balance = balance::value(&total_balance) / 2;
 
-            transfer::public_transfer(coin::take(&mut total_balance, refund_amount, ctx), player_2.address);
+            transfer::public_transfer(coin::take(&mut total_balance, half_balance, ctx), player_1.address);
             transfer::public_transfer(coin::from_balance(total_balance, ctx), player_2.address)
         };
 
