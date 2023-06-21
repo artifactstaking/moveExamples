@@ -12,8 +12,9 @@ module guess_game::game {
 
     struct Game<phantom C> has key {
         id: UID,
-        balance: Balance<C>,
-        players: vector<Player>
+        amount: Balance<C>,
+        players: vector<Player>,
+        is_finished: bool
     }
 
     struct Player has store {
@@ -22,25 +23,27 @@ module guess_game::game {
     }
 
     const EMaxPlayersReached: u64 = 0;
-    const EInvalidStakeAmount: u64 = 1;
+    const EInvalidBetAmount: u64 = 1;
 
     public fun create<C>(
         ctx: &mut TxContext
     ): Game<C> {
         Game {
             id: object::new(ctx),
-            balance: balance::zero(),
+            amount: balance::zero(),
             players: vector::empty(),
+            is_finished: false
         }
     }
 
     public fun create_and_play<C>(
         guess: u64,
-        stake: Coin<C>,
+        payment: Coin<C>,
+        clock: &Clock,
         ctx: &mut TxContext
     ): Game<C> {
         let game = create<C>(ctx);
-        play(&mut game, guess, stake, ctx);
+        play(&mut game, guess, payment, clock, ctx);
 
         game
     }
@@ -54,24 +57,58 @@ module guess_game::game {
     public fun play<C>(
         self: &mut Game<C>,
         guess: u64,
-        stake: Coin<C>,
+        payment: Coin<C>,
+        clock: &Clock,
         ctx: &mut TxContext
     ) {
         assert!(vector::length(&self.players) < 2, EMaxPlayersReached);
 
-        let balance = balance::value(&self.balance);
-        if(balance != 0u64) { assert!(coin::value(&stake) == balance, EInvalidStakeAmount) };
+        let bet_amount = balance::value(&self.amount);
+        if(bet_amount != 0u64) { assert!(coin::value(&payment) == bet_amount, EInvalidBetAmount) };
 
         let player = Player { 
             guess,
             address: tx_context::sender(ctx)
         };
 
-        coin::put(&mut self.balance, stake);
+        coin::put(&mut self.amount, payment);
         vector::push_back(&mut self.players, player);
+
+        if(vector::length(&self.players) == 2) { 
+            finish_game(self, clock, ctx) 
+        }
     }
 
-    public fun random_number<C>(
+    fun finish_game<C>(
+        self: &mut Game<C>,
+        clock: &Clock,
+        ctx: &mut TxContext
+    ) {
+        let number = random_number(self, clock, ctx);
+
+        let player_1 = vector::borrow(&self.players, 0);
+        let player_2 = vector::borrow(&self.players, 1);
+
+        let diff_1 = if(player_1.guess < number) { number - player_1.guess } else { player_1.guess - number };
+        let diff_2 = if(player_2.guess < number) { number - player_2.guess } else { player_2.guess - number };
+
+        let funds = balance::withdraw_all(&mut self.amount);
+
+        if(diff_1 < diff_2) {
+            transfer::public_transfer(coin::from_balance(funds, ctx), player_1.address)
+        } else if(diff_2 < diff_1) {
+            transfer::public_transfer(coin::from_balance(funds, ctx), player_2.address)
+        } else {
+            let half = balance::value(&funds) / 2;
+
+            transfer::public_transfer(coin::take(&mut funds, half, ctx), player_2.address);
+            transfer::public_transfer(coin::from_balance(funds, ctx), player_2.address)
+        };
+
+        self.is_finished = true
+    }
+
+    fun random_number<C>(
         game: &Game<C>,
         clock: &Clock,
         ctx: &mut TxContext
