@@ -114,7 +114,7 @@ module guess_game::game {
     }
 
     fun random_number<C>(
-        game: &Game<C>,
+        self: &Game<C>,
         clock: &Clock,
         ctx: &mut TxContext
     ): u64 {
@@ -122,8 +122,8 @@ module guess_game::game {
         let seed = object::uid_to_bytes(&uid);
         object::delete(uid);
 
-        let player_1 = vector::borrow(&game.players, 0);
-        let player_2 = vector::borrow(&game.players, 1);
+        let player_1 = vector::borrow(&self.players, 0);
+        let player_2 = vector::borrow(&self.players, 1);
 
         let (min, max) = if(player_1.guess > player_2.guess) { 
             (player_2.guess, player_1.guess) 
