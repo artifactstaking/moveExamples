@@ -1,0 +1,9 @@
+[package]
+name = "GuessGame"
+version = "0.0.1"
+
+[dependencies]
+Sui = { git = "https://github.com/MystenLabs/sui.git", subdir = "crates/sui-framework/packages/sui-framework", rev = "framework/testnet" }
+
+[addresses]
+guess_game = "0x0"
